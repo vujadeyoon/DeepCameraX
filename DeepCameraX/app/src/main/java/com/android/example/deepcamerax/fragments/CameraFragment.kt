@@ -680,7 +680,7 @@ class CameraFragment : Fragment() {
 
     companion object {
 
-        private const val TAG = "CameraXBasic"
+        private const val TAG = "DeepCameraX"
         private const val FILENAME = "yyyy-MM-dd-HH-mm-ss-SSS"
         private const val PHOTO_EXTENSION = ".jpg"
         private const val RATIO_4_3_VALUE = 4.0 / 3.0

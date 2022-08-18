@@ -23,7 +23,7 @@ android {
     compileSdkVersion 31
     defaultConfig {
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
-        applicationId "com.android.example.cameraxbasic"
+        applicationId "com.android.example.deepcamerax"
         minSdkVersion 21
         targetSdkVersion 30
         versionCode 1

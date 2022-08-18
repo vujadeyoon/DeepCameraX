@@ -41,6 +41,6 @@ class MainInstrumentedTest {
     fun useAppContext() {
         // Context of the app under test
         val context = ApplicationProvider.getApplicationContext() as Context
-        assertEquals("com.android.example.cameraxbasic", context.packageName)
+        assertEquals("com.android.example.deepcamerax", context.packageName)
     }
 }
