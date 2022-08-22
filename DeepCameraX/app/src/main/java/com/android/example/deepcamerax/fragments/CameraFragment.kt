@@ -22,6 +22,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.res.Configuration
+import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
 import android.hardware.display.DisplayManager
@@ -30,6 +31,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import android.util.Size
 import android.view.KeyEvent
 import android.view.LayoutInflater
 import android.view.View
@@ -100,6 +102,7 @@ class CameraFragment : Fragment() {
     private var camera: Camera? = null
     private var cameraProvider: ProcessCameraProvider? = null
     private lateinit var windowManager: WindowManager
+    private lateinit var bitmapBuffer: Bitmap
 
     private val displayManager by lazy {
         requireContext().getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
@@ -285,6 +288,7 @@ class CameraFragment : Fragment() {
         preview = Preview.Builder()
                 // We request aspect ratio but no resolution
                 .setTargetAspectRatio(screenAspectRatio)
+                // .setTargetResolution(Size(640, 480))
                 // Set initial target rotation
                 .setTargetRotation(rotation)
                 .build()
@@ -295,6 +299,7 @@ class CameraFragment : Fragment() {
                 // We request aspect ratio but no resolution to match preview config, but letting
                 // CameraX optimize for whatever specific resolution best fits our use cases
                 .setTargetAspectRatio(screenAspectRatio)
+                // .setTargetResolution(Size(640, 480))
                 // Set initial target rotation, we will have to call this again if rotation changes
                 // during the lifecycle of this use case
                 .setTargetRotation(rotation)
@@ -304,17 +309,33 @@ class CameraFragment : Fragment() {
         imageAnalyzer = ImageAnalysis.Builder()
                 // We request aspect ratio but no resolution
                 .setTargetAspectRatio(screenAspectRatio)
+                // .setTargetResolution(Size(640, 480))
                 // Set initial target rotation, we will have to call this again if rotation changes
                 // during the lifecycle of this use case
                 .setTargetRotation(rotation)
+                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
                 .build()
                 // The analyzer can then be assigned to the instance
                 .also {
-                    it.setAnalyzer(cameraExecutor, LuminosityAnalyzer { luma ->
+                    it.setAnalyzer(cameraExecutor, ImageAnalysis.Analyzer { image ->
                         // Values returned from our analyzer are passed to the attached listener
                         // We log image analysis results here - you should do something useful
                         // instead!
-                        Log.d(TAG, "Average luminosity: $luma")
+
+                        if (!::bitmapBuffer.isInitialized) {
+                            // The image rotation and RGB image buffer are initialized only once
+                            // the analyzer has started running
+                            bitmapBuffer = Bitmap.createBitmap(image.width, image.height, Bitmap.Config.ARGB_8888)
+                            Log.e("sjyoon", "image.width: " + image.width)
+                            Log.e("sjyoon", "image.height: " + image.height)
+                            Log.e("sjyoon", "image.planes: " + image.planes)
+                            Log.e("sjyoon", "bitmapBuffer.width: " + bitmapBuffer.width)
+                            Log.e("sjyoon", "bitmapBuffer.height: " + bitmapBuffer.height)
+                        }
+
+                        // Copy out RGB bits to our shared buffer
+                        image.use { bitmapBuffer.copyPixelsFromBuffer(image.planes[0].buffer)  }
                     })
                 }
 
@@ -680,7 +701,7 @@ class CameraFragment : Fragment() {
 
     companion object {
 
-        private const val TAG = "DeepCameraX"
+        private const val TAG = "CameraXBasic"
         private const val FILENAME = "yyyy-MM-dd-HH-mm-ss-SSS"
         private const val PHOTO_EXTENSION = ".jpg"
         private const val RATIO_4_3_VALUE = 4.0 / 3.0
