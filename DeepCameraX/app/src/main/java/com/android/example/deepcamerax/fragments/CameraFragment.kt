@@ -23,7 +23,9 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.res.Configuration
 import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Rect
 import android.graphics.drawable.ColorDrawable
 import android.hardware.display.DisplayManager
 import android.media.MediaScannerConnection
@@ -36,6 +38,7 @@ import android.view.KeyEvent
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.view.TextureView
 import android.webkit.MimeTypeMap
 import android.widget.Toast
 import androidx.camera.core.*
@@ -60,6 +63,7 @@ import com.android.example.deepcamerax.utils.ANIMATION_SLOW_MILLIS
 import com.android.example.deepcamerax.utils.simulateClick
 import com.bumptech.glide.Glide
 import com.bumptech.glide.request.RequestOptions
+import kotlinx.android.synthetic.main.fragment_camera.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.io.File
@@ -103,6 +107,9 @@ class CameraFragment : Fragment() {
     private var cameraProvider: ProcessCameraProvider? = null
     private lateinit var windowManager: WindowManager
     private lateinit var bitmapBuffer: Bitmap
+    private lateinit var c: Canvas
+    private lateinit var mPreviewView: TextureView
+
 
     private val displayManager by lazy {
         requireContext().getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
@@ -146,7 +153,7 @@ class CameraFragment : Fragment() {
         // user could have removed them while the app was in paused state.
         if (!PermissionsFragment.hasPermissions(requireContext())) {
             Navigation.findNavController(requireActivity(), R.id.fragment_container).navigate(
-                    CameraFragmentDirections.actionCameraToPermissions()
+                CameraFragmentDirections.actionCameraToPermissions()
             )
         }
     }
@@ -164,9 +171,9 @@ class CameraFragment : Fragment() {
     }
 
     override fun onCreateView(
-            inflater: LayoutInflater,
-            container: ViewGroup?,
-            savedInstanceState: Bundle?
+        inflater: LayoutInflater,
+        container: ViewGroup?,
+        savedInstanceState: Bundle?
     ): View {
         _fragmentCameraBinding = FragmentCameraBinding.inflate(inflater, container, false)
         return fragmentCameraBinding.root
@@ -181,9 +188,9 @@ class CameraFragment : Fragment() {
 
                 // Load thumbnail into circular button using Glide
                 Glide.with(photoViewButton)
-                        .load(uri)
-                        .apply(RequestOptions.circleCropTransform())
-                        .into(photoViewButton)
+                    .load(uri)
+                    .apply(RequestOptions.circleCropTransform())
+                    .into(photoViewButton)
             }
         }
     }
@@ -279,65 +286,117 @@ class CameraFragment : Fragment() {
 
         // CameraProvider
         val cameraProvider = cameraProvider
-                ?: throw IllegalStateException("Camera initialization failed.")
+            ?: throw IllegalStateException("Camera initialization failed.")
 
         // CameraSelector
         val cameraSelector = CameraSelector.Builder().requireLensFacing(lensFacing).build()
 
         // Preview
         preview = Preview.Builder()
-                // We request aspect ratio but no resolution
-                .setTargetAspectRatio(screenAspectRatio)
-                // .setTargetResolution(Size(640, 480))
-                // Set initial target rotation
-                .setTargetRotation(rotation)
-                .build()
+            // We request aspect ratio but no resolution
+            .setTargetAspectRatio(screenAspectRatio)
+            // .setTargetResolution(Size(640, 480))
+            // Set initial target rotation
+            .setTargetRotation(rotation)
+            .build()
 
         // ImageCapture
         imageCapture = ImageCapture.Builder()
-                .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
-                // We request aspect ratio but no resolution to match preview config, but letting
-                // CameraX optimize for whatever specific resolution best fits our use cases
-                .setTargetAspectRatio(screenAspectRatio)
-                // .setTargetResolution(Size(640, 480))
-                // Set initial target rotation, we will have to call this again if rotation changes
-                // during the lifecycle of this use case
-                .setTargetRotation(rotation)
-                .build()
+            .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+            // We request aspect ratio but no resolution to match preview config, but letting
+            // CameraX optimize for whatever specific resolution best fits our use cases
+            .setTargetAspectRatio(screenAspectRatio)
+            // .setTargetResolution(Size(640, 480))
+            // Set initial target rotation, we will have to call this again if rotation changes
+            // during the lifecycle of this use case
+            .setTargetRotation(rotation)
+            .build()
 
         // ImageAnalysis
         imageAnalyzer = ImageAnalysis.Builder()
-                // We request aspect ratio but no resolution
-                .setTargetAspectRatio(screenAspectRatio)
-                // .setTargetResolution(Size(640, 480))
-                // Set initial target rotation, we will have to call this again if rotation changes
-                // during the lifecycle of this use case
-                .setTargetRotation(rotation)
-                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
-                .build()
-                // The analyzer can then be assigned to the instance
-                .also {
-                    it.setAnalyzer(cameraExecutor, ImageAnalysis.Analyzer { image ->
-                        // Values returned from our analyzer are passed to the attached listener
-                        // We log image analysis results here - you should do something useful
-                        // instead!
+            // We request aspect ratio but no resolution
+            .setTargetAspectRatio(screenAspectRatio)
+            // .setTargetResolution(Size(640, 480))
+            // Set initial target rotation, we will have to call this again if rotation changes
+            // during the lifecycle of this use case
+            .setTargetRotation(rotation)
+            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+            .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
+            .build()
+            // The analyzer can then be assigned to the instance
+            .also {
+                it.setAnalyzer(cameraExecutor, LuminosityAnalyzer { luma ->
+                    Log.d("sjyoon", "AVG lum: $luma")
+                })
+//                it.setAnalyzer(cameraExecutor, ImageAnalysis.Analyzer { image ->
+//                    // Values returned from our analyzer are passed to the attached listener
+//                    // We log image analysis results here - you should do something useful
+//                    // instead!
+//
+//                    if (!::bitmapBuffer.isInitialized) {
+//                        // The image rotation and RGB image buffer are initialized only once
+//                        // the analyzer has started running
+//                        bitmapBuffer = Bitmap.createBitmap(image.width, image.height, Bitmap.Config.ARGB_8888)
+//                        Log.e("sjyoon", "image.width: " + image.width)
+//                        Log.e("sjyoon", "image.height: " + image.height)
+//                        Log.e("sjyoon", "image.planes: " + image.planes)
+//                        Log.e("sjyoon", "bitmapBuffer.width: " + bitmapBuffer.width)
+//                        Log.e("sjyoon", "bitmapBuffer.height: " + bitmapBuffer.height)
+//                    }
+//
+//
+//
+////                        R.id.fragment_container
+////                        val mPreview: TextureView? = null
+////                        mPreview.lockCanvas()
+////                        lockCanvas.
+////                        R.id.view_finder
+////
+////
+////                         Copy out RGB bits to our shared buffer
+////                        image.use { bitmapBuffer.copyPixelsFromBuffer(image.planes[0].buffer)  }
+////
+////                        c.drawBitmap(bitmapBuffer, null, Rect(0, 0, 1920, 1080), null)
+////
+////                        mPreview.unlockCanvasAndPost(c)
+////                        bitmapBuffer.getPixels()
+//
+//                    val mBitmap: Bitmap = texture_view_preview.getBitmap()!!
+//                    val tv_w = mBitmap.width
+//                    val tv_h = mBitmap.height
+//
+//                    val tv_w2: Int = 10
+//                    val tv_h2: Int = 10
+//
+//                    Log.e("sjyoon", "texture_view_preview.width: " + tv_w)
+//                    Log.e("sjyoon", "texture_view_preview.height: " + tv_h)
+//                    Log.e("sjyoon", "texture_view_preview.width2: " + tv_w2)
+//                    Log.e("sjyoon", "texture_view_preview.height2: " + tv_h2)
+//
+//                    val maskBmp: Bitmap = mBitmap
+//                    val pixels_fs: IntArray = IntArray(tv_w * tv_h) // bitmapBuffer.height
+//                    maskBmp.getPixels(pixels_fs, 0, tv_w, 0, 0, tv_w, tv_h)
+//
+//                    for (i in 0 until tv_w*tv_h) {
+//                        pixels_fs[i] = 0xFF00FFFF.toInt()
+//                        // Log.e("sjyoon", "Log_i: " + i)
+//                    }
+//
+//                    Log.e("sjyoon", "Finish")
+//
+//                    maskBmp.setPixels(pixels_fs, 0, bitmapBuffer.width, 0, 0, bitmapBuffer.width, bitmapBuffer.height)
+//
+//                    val c: Canvas = texture_view_preview.lockCanvas()!!
+//
+//                    Log.e("sjyoon", "Canvas.height: " + c.height)
+//                    Log.e("sjyoon", "Canvas.width: " + c.width)
+//
+//                    c.drawBitmap(maskBmp, null, Rect(0, 0, bitmapBuffer.width, bitmapBuffer.height),null)
+//                    texture_view_preview.unlockCanvasAndPost(c)
+//                })
+            }
 
-                        if (!::bitmapBuffer.isInitialized) {
-                            // The image rotation and RGB image buffer are initialized only once
-                            // the analyzer has started running
-                            bitmapBuffer = Bitmap.createBitmap(image.width, image.height, Bitmap.Config.ARGB_8888)
-                            Log.e("sjyoon", "image.width: " + image.width)
-                            Log.e("sjyoon", "image.height: " + image.height)
-                            Log.e("sjyoon", "image.planes: " + image.planes)
-                            Log.e("sjyoon", "bitmapBuffer.width: " + bitmapBuffer.width)
-                            Log.e("sjyoon", "bitmapBuffer.height: " + bitmapBuffer.height)
-                        }
 
-                        // Copy out RGB bits to our shared buffer
-                        image.use { bitmapBuffer.copyPixelsFromBuffer(image.planes[0].buffer)  }
-                    })
-                }
 
         // Must unbind the use-cases before rebinding them
         cameraProvider.unbindAll()
@@ -346,11 +405,15 @@ class CameraFragment : Fragment() {
             // A variable number of use-cases can be passed here -
             // camera provides access to CameraControl & CameraInfo
             camera = cameraProvider.bindToLifecycle(
-                    this, cameraSelector, preview, imageCapture, imageAnalyzer)
+                this, cameraSelector, preview, imageCapture, imageAnalyzer)
 
             // Attach the viewfinder's surface provider to preview use case
             preview?.setSurfaceProvider(fragmentCameraBinding.viewFinder.surfaceProvider)
             observeCameraState(camera?.cameraInfo!!)
+
+//            fragmentCameraBinding.viewFinder
+//            fragmentCameraBinding.cameraContainer
+
         } catch (exc: Exception) {
             Log.e(TAG, "Use case binding failed", exc)
         }
@@ -363,32 +426,32 @@ class CameraFragment : Fragment() {
                     CameraState.Type.PENDING_OPEN -> {
                         // Ask the user to close other camera apps
                         Toast.makeText(context,
-                                "CameraState: Pending Open",
-                                Toast.LENGTH_SHORT).show()
+                            "CameraState: Pending Open",
+                            Toast.LENGTH_SHORT).show()
                     }
                     CameraState.Type.OPENING -> {
                         // Show the Camera UI
                         Toast.makeText(context,
-                                "CameraState: Opening",
-                                Toast.LENGTH_SHORT).show()
+                            "CameraState: Opening",
+                            Toast.LENGTH_SHORT).show()
                     }
                     CameraState.Type.OPEN -> {
                         // Setup Camera resources and begin processing
                         Toast.makeText(context,
-                                "CameraState: Open",
-                                Toast.LENGTH_SHORT).show()
+                            "CameraState: Open",
+                            Toast.LENGTH_SHORT).show()
                     }
                     CameraState.Type.CLOSING -> {
                         // Close camera UI
                         Toast.makeText(context,
-                                "CameraState: Closing",
-                                Toast.LENGTH_SHORT).show()
+                            "CameraState: Closing",
+                            Toast.LENGTH_SHORT).show()
                     }
                     CameraState.Type.CLOSED -> {
                         // Free camera resources
                         Toast.makeText(context,
-                                "CameraState: Closed",
-                                Toast.LENGTH_SHORT).show()
+                            "CameraState: Closed",
+                            Toast.LENGTH_SHORT).show()
                     }
                 }
             }
@@ -399,48 +462,48 @@ class CameraFragment : Fragment() {
                     CameraState.ERROR_STREAM_CONFIG -> {
                         // Make sure to setup the use cases properly
                         Toast.makeText(context,
-                                "Stream config error",
-                                Toast.LENGTH_SHORT).show()
+                            "Stream config error",
+                            Toast.LENGTH_SHORT).show()
                     }
                     // Opening errors
                     CameraState.ERROR_CAMERA_IN_USE -> {
                         // Close the camera or ask user to close another camera app that's using the
                         // camera
                         Toast.makeText(context,
-                                "Camera in use",
-                                Toast.LENGTH_SHORT).show()
+                            "Camera in use",
+                            Toast.LENGTH_SHORT).show()
                     }
                     CameraState.ERROR_MAX_CAMERAS_IN_USE -> {
                         // Close another open camera in the app, or ask the user to close another
                         // camera app that's using the camera
                         Toast.makeText(context,
-                                "Max cameras in use",
-                                Toast.LENGTH_SHORT).show()
+                            "Max cameras in use",
+                            Toast.LENGTH_SHORT).show()
                     }
                     CameraState.ERROR_OTHER_RECOVERABLE_ERROR -> {
                         Toast.makeText(context,
-                                "Other recoverable error",
-                                Toast.LENGTH_SHORT).show()
+                            "Other recoverable error",
+                            Toast.LENGTH_SHORT).show()
                     }
                     // Closing errors
                     CameraState.ERROR_CAMERA_DISABLED -> {
                         // Ask the user to enable the device's cameras
                         Toast.makeText(context,
-                                "Camera disabled",
-                                Toast.LENGTH_SHORT).show()
+                            "Camera disabled",
+                            Toast.LENGTH_SHORT).show()
                     }
                     CameraState.ERROR_CAMERA_FATAL_ERROR -> {
                         // Ask the user to reboot the device to restore camera function
                         Toast.makeText(context,
-                                "Fatal error",
-                                Toast.LENGTH_SHORT).show()
+                            "Fatal error",
+                            Toast.LENGTH_SHORT).show()
                     }
                     // Closed errors
                     CameraState.ERROR_DO_NOT_DISTURB_MODE_ENABLED -> {
                         // Ask the user to disable the "Do Not Disturb" mode, then reopen the camera
                         Toast.makeText(context,
-                                "Do not disturb mode enabled",
-                                Toast.LENGTH_SHORT).show()
+                            "Do not disturb mode enabled",
+                            Toast.LENGTH_SHORT).show()
                     }
                 }
             }
@@ -475,9 +538,9 @@ class CameraFragment : Fragment() {
         }
 
         cameraUiContainerBinding = CameraUiContainerBinding.inflate(
-                LayoutInflater.from(requireContext()),
-                fragmentCameraBinding.root,
-                true
+            LayoutInflater.from(requireContext()),
+            fragmentCameraBinding.root,
+            true
         )
 
         // In the background, load latest photo taken (if any) for gallery thumbnail
@@ -507,48 +570,48 @@ class CameraFragment : Fragment() {
 
                 // Create output options object which contains file + metadata
                 val outputOptions = ImageCapture.OutputFileOptions.Builder(photoFile)
-                        .setMetadata(metadata)
-                        .build()
+                    .setMetadata(metadata)
+                    .build()
 
                 // Setup image capture listener which is triggered after photo has been taken
                 imageCapture.takePicture(
-                        outputOptions, cameraExecutor, object : ImageCapture.OnImageSavedCallback {
-                    override fun onError(exc: ImageCaptureException) {
-                        Log.e(TAG, "Photo capture failed: ${exc.message}", exc)
-                    }
-
-                    override fun onImageSaved(output: ImageCapture.OutputFileResults) {
-                        val savedUri = output.savedUri ?: Uri.fromFile(photoFile)
-                        Log.d(TAG, "Photo capture succeeded: $savedUri")
-
-                        // We can only change the foreground Drawable using API level 23+ API
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                            // Update the gallery thumbnail with latest picture taken
-                            setGalleryThumbnail(savedUri)
+                    outputOptions, cameraExecutor, object : ImageCapture.OnImageSavedCallback {
+                        override fun onError(exc: ImageCaptureException) {
+                            Log.e(TAG, "Photo capture failed: ${exc.message}", exc)
                         }
 
-                        // Implicit broadcasts will be ignored for devices running API level >= 24
-                        // so if you only target API level 24+ you can remove this statement
-                        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
-                            requireActivity().sendBroadcast(
+                        override fun onImageSaved(output: ImageCapture.OutputFileResults) {
+                            val savedUri = output.savedUri ?: Uri.fromFile(photoFile)
+                            Log.d(TAG, "Photo capture succeeded: $savedUri")
+
+                            // We can only change the foreground Drawable using API level 23+ API
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                                // Update the gallery thumbnail with latest picture taken
+                                setGalleryThumbnail(savedUri)
+                            }
+
+                            // Implicit broadcasts will be ignored for devices running API level >= 24
+                            // so if you only target API level 24+ you can remove this statement
+                            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
+                                requireActivity().sendBroadcast(
                                     Intent(android.hardware.Camera.ACTION_NEW_PICTURE, savedUri)
-                            )
-                        }
+                                )
+                            }
 
-                        // If the folder selected is an external media directory, this is
-                        // unnecessary but otherwise other apps will not be able to access our
-                        // images unless we scan them using [MediaScannerConnection]
-                        val mimeType = MimeTypeMap.getSingleton()
+                            // If the folder selected is an external media directory, this is
+                            // unnecessary but otherwise other apps will not be able to access our
+                            // images unless we scan them using [MediaScannerConnection]
+                            val mimeType = MimeTypeMap.getSingleton()
                                 .getMimeTypeFromExtension(savedUri.toFile().extension)
-                        MediaScannerConnection.scanFile(
+                            MediaScannerConnection.scanFile(
                                 context,
                                 arrayOf(savedUri.toFile().absolutePath),
                                 arrayOf(mimeType)
-                        ) { _, uri ->
-                            Log.d(TAG, "Image capture scanned into media store: $uri")
+                            ) { _, uri ->
+                                Log.d(TAG, "Image capture scanned into media store: $uri")
+                            }
                         }
-                    }
-                })
+                    })
 
                 // We can only change the foreground Drawable using API level 23+ API
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -557,7 +620,7 @@ class CameraFragment : Fragment() {
                     fragmentCameraBinding.root.postDelayed({
                         fragmentCameraBinding.root.foreground = ColorDrawable(Color.WHITE)
                         fragmentCameraBinding.root.postDelayed(
-                                { fragmentCameraBinding.root.foreground = null }, ANIMATION_FAST_MILLIS)
+                            { fragmentCameraBinding.root.foreground = null }, ANIMATION_FAST_MILLIS)
                     }, ANIMATION_SLOW_MILLIS)
                 }
             }
@@ -586,9 +649,9 @@ class CameraFragment : Fragment() {
             // Only navigate when the gallery has photos
             if (true == outputDirectory.listFiles()?.isNotEmpty()) {
                 Navigation.findNavController(
-                        requireActivity(), R.id.fragment_container
+                    requireActivity(), R.id.fragment_container
                 ).navigate(CameraFragmentDirections
-                        .actionCameraToGallery(outputDirectory.absolutePath))
+                    .actionCameraToGallery(outputDirectory.absolutePath))
             }
         }
     }
@@ -610,6 +673,93 @@ class CameraFragment : Fragment() {
     /** Returns true if the device has an available front camera. False otherwise */
     private fun hasFrontCamera(): Boolean {
         return cameraProvider?.hasCamera(CameraSelector.DEFAULT_FRONT_CAMERA) ?: false
+    }
+
+    /**
+     * Our custom image analysis class.
+     *
+     * <p>All we need to do is override the function `analyze` with our desired operations. Here,
+     * we compute the average luminosity of the image by looking at the Y plane of the YUV frame.
+     */
+    private class DeepLearningAnalyzer(listener: LumaListener? = null) : ImageAnalysis.Analyzer {
+        private val frameRateWindow = 8
+        private val frameTimestamps = ArrayDeque<Long>(5)
+        private val listeners = ArrayList<LumaListener>().apply { listener?.let { add(it) } }
+        private var lastAnalyzedTimestamp = 0L
+        var framesPerSecond: Double = -1.0
+            private set
+
+        /**
+         * Used to add listeners that will be called with each luma computed
+         */
+        fun onFrameAnalyzed(listener: LumaListener) = listeners.add(listener)
+
+        /**
+         * Helper extension function used to extract a byte array from an image plane buffer
+         */
+        private fun ByteBuffer.toByteArray(): ByteArray {
+            rewind()    // Rewind the buffer to zero
+            val data = ByteArray(remaining())
+            get(data)   // Copy the buffer into a byte array
+            return data // Return the byte array
+        }
+
+        /**
+         * Analyzes an image to produce a result.
+         *
+         * <p>The caller is responsible for ensuring this analysis method can be executed quickly
+         * enough to prevent stalls in the image acquisition pipeline. Otherwise, newly available
+         * images will not be acquired and analyzed.
+         *
+         * <p>The image passed to this method becomes invalid after this method returns. The caller
+         * should not store external references to this image, as these references will become
+         * invalid.
+         *
+         * @param image image being analyzed VERY IMPORTANT: Analyzer method implementation must
+         * call image.close() on received images when finished using them. Otherwise, new images
+         * may not be received or the camera may stall, depending on back pressure setting.
+         *
+         */
+        override fun analyze(image: ImageProxy) {
+            // If there are no listeners attached, we don't need to perform analysis
+            if (listeners.isEmpty()) {
+                image.close()
+                return
+            }
+
+            // Keep track of frames analyzed
+            val currentTime = System.currentTimeMillis()
+            frameTimestamps.push(currentTime)
+
+            // Compute the FPS using a moving average
+            while (frameTimestamps.size >= frameRateWindow) frameTimestamps.removeLast()
+            val timestampFirst = frameTimestamps.peekFirst() ?: currentTime
+            val timestampLast = frameTimestamps.peekLast() ?: currentTime
+            framesPerSecond = 1.0 / ((timestampFirst - timestampLast) /
+                    frameTimestamps.size.coerceAtLeast(1).toDouble()) * 1000.0
+
+            // Analysis could take an arbitrarily long amount of time
+            // Since we are running in a different thread, it won't stall other use cases
+
+            lastAnalyzedTimestamp = frameTimestamps.first
+
+            // Since format in ImageAnalysis is YUV, image.planes[0] contains the luminance plane
+            val buffer = image.planes[0].buffer
+
+            // Extract image data from callback object
+            val data = buffer.toByteArray()
+
+            // Convert the data into an array of pixel values ranging 0-255
+            val pixels = data.map { it.toInt() and 0xFF }
+
+            // Compute average luminance for the image
+            val luma = pixels.average()
+
+            // Call all listeners with new value
+            listeners.forEach { it(luma) }
+
+            image.close()
+        }
     }
 
     /**
@@ -709,7 +859,7 @@ class CameraFragment : Fragment() {
 
         /** Helper function used to create a timestamped file */
         private fun createFile(baseFolder: File, format: String, extension: String) =
-                File(baseFolder, SimpleDateFormat(format, Locale.US)
-                        .format(System.currentTimeMillis()) + extension)
+            File(baseFolder, SimpleDateFormat(format, Locale.US)
+                .format(System.currentTimeMillis()) + extension)
     }
 }
